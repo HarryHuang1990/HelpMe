@@ -1,0 +1,12 @@
+package cas.taxiPredict.pathIdentify.util;
+
+public class Utility {
+	public static double refineDoubleZero(double val)
+    {
+        if (Math.abs(val) < Double.MIN_VALUE)
+        {
+            val = Double.MIN_VALUE;
+        }
+        return val;
+    }
+}
