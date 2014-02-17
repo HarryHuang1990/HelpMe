@@ -15,6 +15,7 @@ import java.util.List;
 
 import org.apache.log4j.Logger;
 
+import cas.helpme.PathSearching.RunningPath;
 import cas.taxiPredict.pathIdentify.base.Constants;
 import cas.taxiPredict.pathIdentify.base.StringUtils;
 import cas.taxiPredict.pathIdentify.grid.GridEdge;
@@ -95,6 +96,7 @@ public class Graph {
          while (radius <= maxRadius && (result == null || result.size() <= minSize))
          {
              result = RangeQuery(p, radius);
+//             RunningPath.printCandidateEdges(result);
              if(filter)
              {
             	 result = this.filterEdge(result);
@@ -122,7 +124,7 @@ public class Graph {
     	 while(iter.hasNext())
     	 {
     		Edge cand = iter.next();
-    		if(cand.PathClass() != 2 && cand.PathClass() != 3)
+    		if(!((cand.PathClass() == 2 || cand.PathClass() == 3) ))
     			iter.remove();
     	 }
     	 return result;

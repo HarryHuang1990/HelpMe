@@ -69,6 +69,15 @@ public class Vertex {
      public List<Edge> getAdjacentEdges(){
     	 return this.adjacentEdges;
      }
+     /**
+      * 设置相邻边，不考虑方向
+      * @author Harry Huang
+      * @date 2014.2.16
+      * @param edges
+      */
+     public void setAdjacentEdges(List<Edge> edges){
+    	 this.adjacentEdges = edges;
+     }
      
      public List<Edge> getOutEdges()
      {

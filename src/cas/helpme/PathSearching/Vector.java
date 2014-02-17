@@ -1,5 +1,6 @@
 package cas.helpme.PathSearching;
 
+import cas.taxiPredict.pathIdentify.base.Constants;
 import cas.taxiPredict.trjTools.roadNetwork.GeoPoint;
 import cas.taxiPredict.trjTools.roadNetwork.Vertex;
 
@@ -12,8 +13,8 @@ public class Vector {
 	public Vector(GeoPoint startPoint, GeoPoint endPoint){
  		this.startPoint = startPoint;
 		this.endPoint = endPoint;
-		x1 = endPoint.getLng() - startPoint.getLng();
-		x2 = endPoint.getLat() - startPoint.getLat();
+		x1 = (endPoint.getLng() - startPoint.getLng()) * Constants.M_PER_LNG;
+		x2 = (endPoint.getLat() - startPoint.getLat()) * Constants.M_PER_LAT;
 	}
 
 	public GeoPoint getStartPoint() {

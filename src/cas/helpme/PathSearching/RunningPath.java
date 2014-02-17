@@ -13,6 +13,8 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.Stack;
 
+import org.apache.log4j.Logger;
+
 import cas.taxiPredict.pathIdentify.outWrapper.SegIdxObject;
 import cas.taxiPredict.trjTools.roadNetwork.Edge;
 import cas.taxiPredict.trjTools.roadNetwork.GeoPoint;
@@ -27,46 +29,114 @@ import cas.taxiPredict.trjTools.roadNetwork.Vertex;
  */
 public class RunningPath {
 	
+	private final static Logger log = Logger.getLogger(RunningPath.class);
 	private Graph graph;
 	private HashSet<Edge> edges;
-	private List<Road> roads;
-	private List<Path> shortestPaths;
+	private List<Road> roads = new ArrayList<Road>();
+	private List<Path> shortestPaths = new ArrayList<Path>();
 	private GeoPoint spot;
 	
-	private Edge targetEdge;	//用户所在的Edge或离用户最近Edge
+	private Edge targetEdge;		//用户所在的Edge或离用户最近Edge
+	private Vertex projectPoint;	//用户所在位置在targetEdge上的投影点【如果不是Graph上的点，则新建一个新点，ID=-1】
+	private int segIdx=0;			//投影点所在segment的Id
 	private double lengthToStart; //用户所在位置离targetEdge的起点距离
 	private double lengthToEnd;	//用户所在位置离targetEdge的终点距离
+	private List<Edge> adjacentEdgesOfProjectPoint = null;		// 如果ProjectPoint是targetEdge上的某一点，则以该投影点端点，分别造两条到targetEdge起点和终点的Edge, ID分别为-1,-2
 	
 	final static int MAX_RADIUS_FOR_ROAD = 1000;
-    final static int RADIUS_FOR_ROAD = 100;
+    final static int RADIUS_FOR_ROAD = 300;
     final static int MAX_RADIUS_FOR_USER = 100;
     final static int RADIUS_FOR_USER = 40;
     final static int MAX_RADIUS_FOR_FACILITY = 5000;
     final static int RADIUS_FOR_FACILITY = 1200;
     final static double MAX_EXPAND_LEN = 1000;
-    final static double MIN_EDGE_ANGLE = Math.cos(20.0);		//判断是否为同一条路的夹角阈值
+    final static double MIN_ROAD_LEN = 50;						// 恢复出的主干道的允许的最小长度【针对交叉路口上起连接干道作用的短Edge】
+    final static double MIN_EDGE_ANGLE = Math.cos(Math.PI/6);		//判断是否为同一条路的夹角阈值
 	
 	public RunningPath(Graph g)
 	{
 		this.graph = g;
 	}
 	
-	public void run()
-	{
+	public void search(GeoPoint spot)
+	{	
+		this.spot = spot;
 		// TODO 查询候选的edges;
-		this.edges = graph.RangeQuery(spot, RADIUS_FOR_ROAD, MAX_RADIUS_FOR_ROAD, true);
+		log.info("正在查询候选的干道Edges...");
+		this.edges = graph.RangeQuery(this.spot, RADIUS_FOR_ROAD, MAX_RADIUS_FOR_ROAD, true);
+		printCandidateEdges(this.edges);
 		
 		// TODO 识别恢复出干道;
+		log.info("正在识别干道...");
 		this.mainRoadRecovery();
+		this.printCandidateRoads();
 		
 		// TODO 确定用户所在的Edge
+		log.info("正在确定用户所在的Edge...");
 		this.locateUserPosition();
+		this.printTargetEdge();
 		
 		// TODO 搜索从用户所在位置到主干道的最短路径
-		this.searchingShortestPath(this.targetEdge.Start());
+		log.info("正在搜索从用户所在位置到主干道的最短路径...");
+		this.searchingShortestPath(this.projectPoint);
 		
 		// TODO 计算步行成本
+		log.info("正在计算前往各条干道的最短路径上的行走成本...");
 		this.calculateTimeCostOfT1();
+		this.printSerchingResults();
+		
+		this.edges = null;
+		this.roads = null;
+		this.shortestPaths = null;
+	}
+	
+	/**
+	 * 打印用户所在的Edge
+	 */
+	public void printTargetEdge(){
+		System.out.println("用户所在的Edge:");
+		System.out.println("ID : " + targetEdge.ID() + "\t" + targetEdge.Kind() + "\t" + targetEdge.Width() + "\t" + targetEdge.Name() + "\t" + targetEdge.PathClass() + "\t" + targetEdge.Length() + "\t" + targetEdge.CarrayAble() + "\t<" + targetEdge.Start().getLat() + ", " + targetEdge.Start().getLng() + ">--><" + targetEdge.End().getLat() + ", " + targetEdge.End().getLng() + ">");
+		System.out.println("到起点的距离" + this.lengthToStart);
+		System.out.println("到终点的距离" + this.lengthToEnd);
+	}
+	
+	/**
+	 * 输出延拓出的干道
+	 */
+	public void printCandidateRoads()
+	{
+		System.out.println("候选road:");
+		for(Road road : this.roads)
+			System.out.println(road.toString());
+	}
+	
+	/**
+	 * 输出候选的Edge
+	 */
+	public static void printCandidateEdges(HashSet<Edge>edges){
+		System.out.println("候选Edges:");
+		for(Edge edge : edges){
+			System.out.println("ID : " + edge.ID() + "\t" + edge.Kind() + "\t" + edge.Width() + "\t" + edge.Name() + "\t" + edge.PathClass() + "\t" + edge.Length() + "\t" + edge.CarrayAble() + "\t<" + edge.Start().getLat() + ", " + edge.Start().getLng() + ">--><" + edge.End().getLat() + ", " + edge.End().getLng() + ">");
+		}
+	}
+	
+	/**
+	 * 打印搜索结果
+	 */
+	public void printSerchingResults()
+	{
+		int resultCount = 0;
+		if(this.shortestPaths != null && this.shortestPaths.size() > 0)
+			resultCount = this.shortestPaths.size();
+		System.out.println("共找到" + resultCount + "条主干道");
+		for(int i=0; i<resultCount; i++)
+		{
+			Path path = this.shortestPaths.get(i);
+			System.out.println("主干道" + i);
+			System.out.println("\t" + path.getRoad().toString());
+			System.out.println("\t最短路径:");
+			System.out.println("\t\t" + path.toString());
+		}
 	}
 	
 	public List<Path> getShortestPaths() {
@@ -90,7 +160,7 @@ public class RunningPath {
 	 */
 	private void searchingShortestPath(Vertex startPoint)
 	{
-		Map<Vertex, DijkstraObject> s = new HashMap<Vertex, DijkstraObject>();		// 确定最短路径的点集
+		Map<Vertex, DijkstraObject> s = new HashMap<Vertex, DijkstraObject>();		// 已经确定了最短路径的点集
 		Map<Vertex, DijkstraObject> q = new HashMap<Vertex, DijkstraObject>();
 		Comparator<Entry<Vertex, DijkstraObject>> comparator = new Comparator<Entry<Vertex, DijkstraObject>>(){
 			@Override
@@ -154,30 +224,32 @@ public class RunningPath {
 				edgeStack.push(dijObj.getPreviousEdge());
 			}
 			v = dijObj.getPreviousVertex();
-			if(v == this.targetEdge.End())		//如果在路径上经过targetEdge的终点，则说明该路径从targetEdge终点开始即可，无需从startPoint开始
-				v = null;
+//			if(v == this.targetEdge.End())		//如果在路径上经过targetEdge的终点，则说明该路径从targetEdge终点开始即可，无需从startPoint开始
+//				v = null;
 		}
 		
 		// 生成path对象
+		List<Edge> edges = new ArrayList<Edge>();
+		List<Vertex> vertexs = new ArrayList<Vertex>();
+		
+		vertexs.add(vertexStack.pop());
+		while(!vertexStack.empty()){
+			edges.add(edgeStack.pop());
+			vertexs.add(vertexStack.pop());
+		}
+		
 		for(Road road : destinations)
 		{
-			Path path = new Path(road);
-			List<Edge> edges = new ArrayList<Edge>();
-			List<Vertex> vertexs = new ArrayList<Vertex>();
-			
-			vertexs.add(vertexStack.pop());
-			while(!vertexStack.empty()){
-				edges.add(edgeStack.pop());
-				vertexs.add(vertexStack.pop());
+			Path path = new Path(road, edges, vertexs);
+			if(edges.size() == 0)	//如果请求服务的点spot就在主干道上
+			{
+				path.setDestinationEdge(this.targetEdge);
+				path.setDestinationSegIdx(this.segIdx);
 			}
-			
-			path.setVertexs(vertexs);
-			path.setEdges(edges);
 			this.shortestPaths.add(path);
 		}
 		
 	}
-	
 	
 	/**
 	 * 判断是否是干道上的点。
@@ -187,9 +259,15 @@ public class RunningPath {
 	private List<Road> isTheVertexOfMainRoad(Vertex vertex)
 	{
 		List<Road> reachedRoads = new ArrayList<Road>();
+		Vertex v = vertex;
+		if(vertex.getId() == -1)
+		{
+			//如果vertex是projectPoint
+			v = this.targetEdge.Start();
+		}
 		for(Road road : this.roads)
 		{
-			if(road.containsVertex(vertex))
+			if(road.containsVertex(v))
 			{
 				reachedRoads.add(road);
 			}
@@ -249,8 +327,6 @@ public class RunningPath {
 	}
 	
 	
-	
-	
 	private void locateUserPosition()
 	{
 		// 定位用户所在的位置
@@ -284,11 +360,15 @@ public class RunningPath {
 		{
 			// 超出起点
 			lengthToEnd = targetEdge.Length();
+			this.projectPoint = targetEdge.Start();
+			this.segIdx = 0;
 		}
 		else if(projectType > 0)
 		{
 			// 超出终点
 			lengthToStart = targetEdge.Length();
+			this.projectPoint = targetEdge.End();
+			this.segIdx = targetEdge.getGeo().Points().size() - 2;
 		}
 		else
 		{
@@ -314,6 +394,13 @@ public class RunningPath {
 				lengthToEnd += GeoPoint.GetPreciseDistance(projectPosition, points.get(projectSegId.segIdx + 1));
 				lengthToStart += targetEdge.Length() - lengthToEnd;
 			}
+			this.projectPoint = new Vertex(-1, projectPosition.getLat(), projectPosition.getLng());
+			this.segIdx = projectSegId.segIdx;
+			// 造两条分别到起点和终点的新边
+			this.adjacentEdgesOfProjectPoint = new ArrayList<Edge>();
+			this.adjacentEdgesOfProjectPoint.add(new Edge(-1, this.targetEdge.Start(), this.projectPoint, this.lengthToStart));
+			this.adjacentEdgesOfProjectPoint.add(new Edge(-2, this.projectPoint, this.targetEdge.End(), this.lengthToEnd));
+			this.projectPoint.setAdjacentEdges(adjacentEdgesOfProjectPoint);
 		}
 	}
 	
@@ -324,6 +411,9 @@ public class RunningPath {
 		while(iter.hasNext())
 		{
 			Edge edge = iter.next();
+			if(edge.ID() == 59567212065L){
+				int a = 0;
+			}
 			if(!this.isIdentified(edge))
 			{
 				List<Edge> edgesFromIn = this.expandRoadFromInEdges(edge, 0);
@@ -340,7 +430,8 @@ public class RunningPath {
 					vertexs.add(rEdges.get(i).End());
 				}
 				Road road = new Road(rEdges, vertexs);
-				this.roads.add(road);
+				if(road.length() > MIN_ROAD_LEN)
+					this.roads.add(road);
 			}
 		}
 	}
@@ -386,7 +477,16 @@ public class RunningPath {
 		if(inEdges == null || inEdges.size() == 0)
 			prevEdge = null;
 		else if(inEdges.size() == 1)
-			prevEdge = inEdges.get(0);
+		{
+			Vector vec = new Vector(edge.getGeo().Points().get(0), edge.getGeo().Points().get(1));
+			List<GeoPoint> points = inEdges.get(0).getGeo().Points();
+			Vector eVector = new Vector(points.get(points.size()-2), points.get(points.size()-1));
+			double cos = vec.CosinWith(eVector);
+			if(cos > MIN_EDGE_ANGLE)
+			{
+				prevEdge = inEdges.get(0);
+			}
+		}
 		else
 		{
 			//选择同方向夹角最小的Edge
@@ -394,7 +494,7 @@ public class RunningPath {
 			double maxCos = 0;
 			for(Edge e : inEdges)
 			{
-				if(e.Width() == edge.Width() && e.Kind().equals(edge.Width()) && e.PathClass() == edge.PathClass()){
+//				if(e.Width() == edge.Width() && e.Kind().equals(edge.Kind()) && e.PathClass() == edge.PathClass()){
 					List<GeoPoint> points = e.getGeo().Points();
 					Vector eVector = new Vector(points.get(points.size()-2), points.get(points.size()-1));
 					double cos = vec.CosinWith(eVector);
@@ -403,7 +503,7 @@ public class RunningPath {
 						maxCos = cos;
 						prevEdge = e;
 					}
-				}
+//				}
 			}
 		}
 		return prevEdge;
@@ -415,7 +515,16 @@ public class RunningPath {
 		if(outEdges == null || outEdges.size() == 0)
 			nextEdge = null;
 		else if(outEdges.size() == 1)
-			nextEdge = outEdges.get(0);
+		{
+			List<GeoPoint> segPoints = edge.getGeo().Points(); 
+			Vector vec = new Vector(segPoints.get(segPoints.size()-2), segPoints.get(segPoints.size()-1));
+			Vector eVector = new Vector(outEdges.get(0).getGeo().Points().get(0), outEdges.get(0).getGeo().Points().get(1));
+			double cos = vec.CosinWith(eVector);
+			if(cos > MIN_EDGE_ANGLE)
+			{
+				nextEdge = outEdges.get(0);
+			}
+		}
 		else
 		{
 			//选择同方向夹角最小的Edge
@@ -424,7 +533,7 @@ public class RunningPath {
 			double maxCos = 0;
 			for(Edge e : outEdges)
 			{
-				if(e.Width() == edge.Width() && e.Kind().equals(edge.Width()) && e.PathClass() == edge.PathClass()){
+//				if(e.Width() == edge.Width() && e.Kind().equals(edge.Kind()) && e.PathClass() == edge.PathClass()){
 					Vector eVector = new Vector(e.getGeo().Points().get(0), e.getGeo().Points().get(1));
 					double cos = vec.CosinWith(eVector);
 					if(cos > maxCos && cos > MIN_EDGE_ANGLE)
@@ -432,7 +541,7 @@ public class RunningPath {
 						maxCos = cos;
 						nextEdge = e;
 					}
-				}
+//				}
 			}
 		}
 		return nextEdge;
